@@ -29,6 +29,7 @@ class CrossDbType(object):
 	XDB_TYPE_FLOAT	   	= 9
 	XDB_TYPE_DOUBLE	 = 10
 	XDB_TYPE_CHAR		= 12
+	XDB_TYPE_VCHAR		= 14
 
 class CrossDbInterface(object):
 	libCrossdb = load_crossdb()
@@ -42,6 +43,17 @@ class CrossDbInterface(object):
 	libCrossdb.xdb_free_result.argtypes = [ctypes.c_void_p]
 	libCrossdb.xdb_commit.argtypes = [ctypes.c_void_p]
 	libCrossdb.xdb_rollback.argtypes = [ctypes.c_void_p]
+	libCrossdb.xdb_affected_rows.argtypes = [ctypes.c_void_p]
+	libCrossdb.xdb_row_count.argtypes = [ctypes.c_void_p]
+	libCrossdb.xdb_column_count.argtypes = [ctypes.c_void_p]
+	libCrossdb.xdb_column_type.argtypes = [ctypes.c_void_p, ctypes.c_uint16]
+	libCrossdb.xdb_column_name.argtypes = [ctypes.c_void_p, ctypes.c_uint16]
+	libCrossdb.xdb_column_name.restype = ctypes.c_char_p
+	libCrossdb.xdb_column_int.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
+	libCrossdb.xdb_column_str.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
+	libCrossdb.xdb_column_str.restype = ctypes.c_char_p
+	libCrossdb.xdb_col_double.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
+	libCrossdb.xdb_col_double.restype = ctypes.c_double
 
 class CrossDbConnection(object):
 	def __init__(self, database):
@@ -95,22 +107,19 @@ class CrossDbCursor(object):
 
 	@property
 	def rowcount(self):
-		return self._rowCount
+		return self._libCrossdb.xdb_row_count(self._hResult)
 
 	@property
 	def affected_rows(self):
-		return self._affectedRows
+		return self._libCrossdb.xdb_affected_rows(self._hResult)
 
 	@property
 	def description(self):
 		self._description = []
-		if self._rowMeta > 0:
-			pColList = ctypes.cast(self._rowMeta + 16, ctypes.POINTER(ctypes.c_uint64))[0]
+		if self._hResult > 0:
 			for i in range (self._fldCount):
-				pCol = ctypes.cast(pColList, ctypes.POINTER(ctypes.c_uint64))[i]
-				bytes = ctypes.cast(pCol + 10, ctypes.POINTER(ctypes.c_uint8))[0]
-				colName = ctypes.cast(pCol + 11, ctypes.POINTER(ctypes.c_char*bytes))[0].value
-				colType = ctypes.cast(pCol + 2, ctypes.POINTER(ctypes.c_int8))[0]
+				colType = self._libCrossdb.xdb_column_type(self._hResult, i)
+				colName = self._libCrossdb.xdb_column_name(self._hResult, i)
 				self._description.append ((colName, colType, None, None, None, None, False))		
 		return self._description
 
@@ -124,20 +133,12 @@ class CrossDbCursor(object):
 			self._libCrossdb.xdb_free_result(self._hResult)
 		self._hResult = self._libCrossdb.xdb_exec (self._hConn, sql.encode("utf-8"))
 		self._errno = ctypes.cast(self._hResult + 4, ctypes.POINTER(ctypes.c_uint16))[0]
-		self._rowMeta = ctypes.cast(self._hResult + 5*8, ctypes.POINTER(ctypes.c_uint64))[0]
-		self._rowCount = ctypes.cast(self._hResult + 2*8, ctypes.POINTER(ctypes.c_uint64))[0]
-		self._fldCount = ctypes.cast(self._hResult + 12, ctypes.POINTER(ctypes.c_uint16))[0]
-		self._affectedRows = ctypes.cast(self._hResult + 3*8, ctypes.POINTER(ctypes.c_uint64))[0]
-		if self._rowMeta > 0:
-			pColList = ctypes.cast(self._rowMeta + 16, ctypes.POINTER(ctypes.c_uint64))[0]
+		self._fldCount = self._libCrossdb.xdb_column_count (self._hResult)
+		if self._fldCount > 0:
 			self._fieldType = []
 			for i in range (self._fldCount):
-				pCol = ctypes.cast(pColList, ctypes.POINTER(ctypes.c_uint64))[i]
-				colType = ctypes.cast(pCol + 2, ctypes.POINTER(ctypes.c_int8))[0]
+				colType = self._libCrossdb.xdb_column_type(self._hResult, i)
 				self._fieldType.append (colType)
-		else:
-			self._fieldType = None
-			self._hResult = None
 		return self._errno
 
 	def fetchone(self):
@@ -146,32 +147,18 @@ class CrossDbCursor(object):
 		if None == xrow:
 			return None
 		for i in range (self._fldCount):
-			field = ctypes.cast(xrow, ctypes.POINTER(ctypes.c_uint64))[i]
-			if None != field:
-				type = self._fieldType[i]
-				if CrossDbType.XDB_TYPE_INT == type:
-					value = ctypes.cast(field, ctypes.POINTER(ctypes.c_int32))[0]
-					row.append (value)
-				elif CrossDbType.XDB_TYPE_CHAR == type:
-					bytes = ctypes.cast(field-2, ctypes.POINTER(ctypes.c_uint16))[0]
-					value = ctypes.cast(field, ctypes.POINTER(ctypes.c_char*bytes))[0].value
-					row.append (value)
-				elif CrossDbType.XDB_TYPE_SMALLINT == type:
-					value = ctypes.cast(field, ctypes.POINTER(ctypes.c_int16))[0]
-					row.append (value)
-				elif CrossDbType.XDB_TYPE_TINYINT == type:
-					value = ctypes.cast(field, ctypes.POINTER(ctypes.c_int8))[0]
-					row.append (value)
-				elif CrossDbType.XDB_TYPE_FLOAT == type:
-					value = ctypes.cast(field, ctypes.POINTER(ctypes.c_float))[0]
-					row.append (value)
-				elif CrossDbType.XDB_TYPE_DOUBLE == type:
-					value = ctypes.cast(field, ctypes.POINTER(ctypes.c_double))[0]
-					row.append (value)
-				else:
-					print ("Unknow type: "+str(self._fieldType[i]))
+			type = self._fieldType[i]
+			if CrossDbType.XDB_TYPE_INT == type or CrossDbType.XDB_TYPE_SMALLINT == type or CrossDbType.XDB_TYPE_TINYINT == type:
+				value = self._libCrossdb.xdb_column_int(self._hResult, xrow, i)
+				row.append (value)
+			elif CrossDbType.XDB_TYPE_CHAR == type or CrossDbType.XDB_TYPE_VCHAR == type:
+				value = self._libCrossdb.xdb_column_str(self._hResult, xrow, i)
+				row.append (value)
+			elif CrossDbType.XDB_TYPE_FLOAT == type or CrossDbType.XDB_TYPE_DOUBLE == type:
+				value = self._libCrossdb.xdb_column_double(self._hResult, xrow, i)
+				row.append (value)
 			else:
-				row.append (None)
+				print ("Unknow type: "+str(self._fieldType[i]))
 		return row
 
 	def fetchall(self):

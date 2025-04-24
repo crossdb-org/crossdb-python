@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import crossdb
 
 conn = crossdb.connect(database=":memory:")
