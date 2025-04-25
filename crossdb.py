@@ -1,12 +1,15 @@
+#!/usr/bin/python3
 import ctypes
 import datetime
 import os
 import platform
 
-def connect (host=None, port=7777, user='admin', password='admin', database=None):
-	if host == None:
-		return CrossDbConnection(database)
-	return CrossDbConnector(host, port, user, password, database)
+def connect(host=None, port=0, user='admin', password='admin', database=None):
+	if host != None:
+		host = host.encode("utf-8")
+	if database != None:
+		database = database.encode("utf-8")
+	return CrossDbConnection(host, port, user.encode("utf-8"), password.encode("utf-8"), database)
 
 def load_crossdb():
 	sys = platform.system()
@@ -30,11 +33,14 @@ class CrossDbType(object):
 	XDB_TYPE_DOUBLE	 = 10
 	XDB_TYPE_CHAR		= 12
 	XDB_TYPE_VCHAR		= 14
+	XDB_TYPE_BOOL		= 16
 
 class CrossDbInterface(object):
 	libCrossdb = load_crossdb()
 	libCrossdb.xdb_open.argtypes = [ctypes.c_void_p]
 	libCrossdb.xdb_open.restype = ctypes.c_void_p
+	libCrossdb.xdb_connect.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
+	libCrossdb.xdb_connect.restype = ctypes.c_void_p
 	libCrossdb.xdb_close.argtypes = [ctypes.c_void_p]
 	libCrossdb.xdb_exec.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 	libCrossdb.xdb_exec.restype = ctypes.c_void_p
@@ -52,17 +58,19 @@ class CrossDbInterface(object):
 	libCrossdb.xdb_column_int.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
 	libCrossdb.xdb_column_str.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
 	libCrossdb.xdb_column_str.restype = ctypes.c_char_p
+	libCrossdb.xdb_column_bool.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
+	libCrossdb.xdb_column_bool.restype = ctypes.c_bool
 	libCrossdb.xdb_col_double.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
 	libCrossdb.xdb_col_double.restype = ctypes.c_double
 
 class CrossDbConnection(object):
-	def __init__(self, database):
+	def __init__(self, host, port, user, password, database):
 		self._hConn = ctypes.c_void_p()
 		if CrossDbInterface.libCrossdb == None:
 			self._hDb == None
 			print ("Can't open CrossDb library")
 			return
-		self._hConn = CrossDbInterface.libCrossdb.xdb_open (database.encode("utf-8"))
+		self._hConn = CrossDbInterface.libCrossdb.xdb_connect (host, user, password, database, port)
 		if self._hConn == None:
 			print ("Can't open connection")
 
@@ -157,6 +165,9 @@ class CrossDbCursor(object):
 			elif CrossDbType.XDB_TYPE_FLOAT == type or CrossDbType.XDB_TYPE_DOUBLE == type:
 				value = self._libCrossdb.xdb_column_double(self._hResult, xrow, i)
 				row.append (value)
+			elif CrossDbType.XDB_TYPE_BOOL == type:
+				value = self._libCrossdb.xdb_column_bool(self._hResult, xrow, i)
+				row.append (value)
 			else:
 				print ("Unknow type: "+str(self._fieldType[i]))
 		return row
@@ -189,8 +200,8 @@ if __name__ == '__main__':
 
 	conn = connect(database=":memory:")
 	cursor = conn.cursor()
-	cursor.execute("CREATE TABLE student (name CHAR(16), age INT, class CHAR(16))")
-	cursor.execute("INSERT INTO student (name,age,class) VALUES ('jack',10,'3-1'), ('tom',11,'2-5')")
+	cursor.execute("CREATE TABLE student (name CHAR(16), age INT, class CHAR(16), male BOOL)")
+	cursor.execute("INSERT INTO student (name,age,class,male) VALUES ('jack',10,'3-1', false), ('rose',11,'2-5', true)")
 	print ("insert rows: ", cursor.affected_rows)	
 	cursor.execute("SELECT * from student")
 	print ("select row count: ", cursor.rowcount)
