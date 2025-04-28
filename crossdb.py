@@ -3,6 +3,7 @@ import ctypes
 import datetime
 import os
 import platform
+import socket
 
 def connect(host=None, port=0, user='admin', password='admin', database=None):
 	if host != None:
@@ -28,12 +29,13 @@ class CrossDbType(object):
 	XDB_TYPE_TINYINT	= 1
 	XDB_TYPE_SMALLINT	= 2
 	XDB_TYPE_INT		= 3
-	XDB_TYPE_BIGINT	 = 4
+	XDB_TYPE_BIGINT	 	= 4
 	XDB_TYPE_FLOAT	   	= 9
-	XDB_TYPE_DOUBLE	 = 10
+	XDB_TYPE_DOUBLE	 	= 10
 	XDB_TYPE_CHAR		= 12
 	XDB_TYPE_VCHAR		= 14
 	XDB_TYPE_BOOL		= 16
+	XDB_TYPE_INET		= 17
 
 class CrossDbInterface(object):
 	libCrossdb = load_crossdb()
@@ -62,6 +64,9 @@ class CrossDbInterface(object):
 	libCrossdb.xdb_column_bool.restype = ctypes.c_bool
 	libCrossdb.xdb_col_double.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
 	libCrossdb.xdb_col_double.restype = ctypes.c_double
+	libCrossdb.xdb_column_inet.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
+	libCrossdb.xdb_column_inet.restype = ctypes.c_char_p
+	libCrossdb.xdb_inet_sprintf.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint16]
 
 class CrossDbConnection(object):
 	def __init__(self, host, port, user, password, database):
@@ -97,6 +102,7 @@ class CrossDbCursor(object):
 		self._hConn = hConn
 		self._libCrossdb = CrossDbInterface.libCrossdb
 		self._hResult = None
+		self._valBuf = ctypes.create_string_buffer(128)
 
 	def __del__(self):
 		self.close()
@@ -156,20 +162,22 @@ class CrossDbCursor(object):
 			return None
 		for i in range (self._fldCount):
 			type = self._fieldType[i]
+			value = None
 			if CrossDbType.XDB_TYPE_INT == type or CrossDbType.XDB_TYPE_SMALLINT == type or CrossDbType.XDB_TYPE_TINYINT == type:
 				value = self._libCrossdb.xdb_column_int(self._hResult, xrow, i)
-				row.append (value)
 			elif CrossDbType.XDB_TYPE_CHAR == type or CrossDbType.XDB_TYPE_VCHAR == type:
 				value = self._libCrossdb.xdb_column_str(self._hResult, xrow, i)
-				row.append (value)
 			elif CrossDbType.XDB_TYPE_FLOAT == type or CrossDbType.XDB_TYPE_DOUBLE == type:
 				value = self._libCrossdb.xdb_column_double(self._hResult, xrow, i)
-				row.append (value)
 			elif CrossDbType.XDB_TYPE_BOOL == type:
 				value = self._libCrossdb.xdb_column_bool(self._hResult, xrow, i)
-				row.append (value)
+			elif CrossDbType.XDB_TYPE_INET == type:
+				inet = self._libCrossdb.xdb_column_inet(self._hResult, xrow, i)
+				self._libCrossdb.xdb_inet_sprintf(inet, self._valBuf, 128)
+				value = self._valBuf.value
 			else:
-				print ("Unknow type: "+str(self._fieldType[i]))
+				print ("Unknow type: "+str(type))
+			row.append (value)
 		return row
 
 	def fetchall(self):
